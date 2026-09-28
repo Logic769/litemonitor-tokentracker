@@ -1,0 +1,414 @@
+{
+  "id": "TokenTracker",
+  "meta": {
+    "name": "Token 用量 (TokenTracker)",
+    "version": "1.0.0",
+    "author": "Codex",
+    "description": "读取 TokenTracker 本地服务，在任务栏/面板显示 AI 编程工具的 Token 用量与花费。显示类别可在插件设置里按目标选择：今日、今日总量(含缓存)、近7天、近30天、累计、近7天花费、累计花费。需要 TokenTracker 桌面端处于运行状态。",
+    "url": "https://www.tokentracker.cc"
+  },
+  "inputs": [
+    {
+      "key": "base_url",
+      "label": "TokenTracker 本地地址",
+      "type": "text",
+      "default": "http://127.0.0.1:17680",
+      "placeholder": "http://127.0.0.1:17680",
+      "scope": "global"
+    },
+    {
+      "key": "tz",
+      "label": "统计时区",
+      "type": "text",
+      "default": "Asia/Shanghai",
+      "placeholder": "Asia/Shanghai",
+      "scope": "global"
+    },
+    {
+      "key": "display_mode",
+      "label": "显示类别",
+      "type": "select",
+      "default": "today",
+      "scope": "target",
+      "options": [
+        { "label": "今日用量 (计费 Token)", "value": "today" },
+        { "label": "今日总量 (含缓存)", "value": "today_all" },
+        { "label": "近 7 天用量", "value": "week" },
+        { "label": "近 30 天用量", "value": "month" },
+        { "label": "累计用量", "value": "total" },
+        { "label": "近 7 天花费", "value": "week_cost" },
+        { "label": "累计花费", "value": "total_cost" }
+      ]
+    }
+  ],
+  "execution": {
+    "type": "chain",
+    "interval": 60,
+    "min_interval": 30,
+    "steps": [
+      {
+        "id": "today",
+        "url": "{{base_url}}/functions/tokentracker-usage-heatmap?weeks=1&tz={{tz}}",
+        "method": "GET",
+        "response_format": "json",
+        "extract": {
+          "last7_arr": "weeks[0]",
+          "cost_7d": "total_cost_usd",
+          "active_days_7d": "active_days"
+        },
+        "process": [
+          {
+            "var": "today_tokens",
+            "source": "last7_arr",
+            "function": "regex_match",
+            "pattern": "^.*\"billable_total_tokens\":(\\d+)",
+            "to": "1"
+          },
+          {
+            "var": "today_total",
+            "source": "last7_arr",
+            "function": "regex_match",
+            "pattern": "^.*\"total_tokens\":(\\d+)",
+            "to": "1"
+          },
+          {
+            "var": "today_color",
+            "source": "today_tokens",
+            "function": "threshold_switch",
+            "value_map": {
+              "0": "0",
+              "30000000": "1",
+              "100000000": "2"
+            }
+          },
+          {
+            "var": "today_tokens_fmt",
+            "source": "today_tokens",
+            "function": "regex_replace",
+            "pattern": "^$",
+            "to": "?"
+          },
+          {
+            "var": "today_tokens_fmt",
+            "source": "today_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{8})$",
+            "to": "$1.$2B"
+          },
+          {
+            "var": "today_tokens_fmt",
+            "source": "today_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{5})$",
+            "to": "$1.$2M"
+          },
+          {
+            "var": "today_tokens_fmt",
+            "source": "today_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{2})$",
+            "to": "$1.$2K"
+          },
+          {
+            "var": "today_total_fmt",
+            "source": "today_total",
+            "function": "regex_replace",
+            "pattern": "^$",
+            "to": "?"
+          },
+          {
+            "var": "today_total_fmt",
+            "source": "today_total_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{8})$",
+            "to": "$1.$2B"
+          },
+          {
+            "var": "today_total_fmt",
+            "source": "today_total_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{5})$",
+            "to": "$1.$2M"
+          },
+          {
+            "var": "today_total_fmt",
+            "source": "today_total_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{2})$",
+            "to": "$1.$2K"
+          },
+          {
+            "var": "cost_7d_fmt",
+            "source": "cost_7d",
+            "function": "regex_replace",
+            "pattern": "^(\\d+\\.\\d{2})\\d*$",
+            "to": "$1"
+          },
+          {
+            "var": "cost_7d_fmt",
+            "source": "cost_7d_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d+)$",
+            "to": "$1.00"
+          },
+          {
+            "var": "cost_color",
+            "source": "cost_7d",
+            "function": "threshold_switch",
+            "value_map": {
+              "0": "0",
+              "1": "1",
+              "5": "2"
+            }
+          }
+        ]
+      },
+      {
+        "id": "rolling",
+        "url": "{{base_url}}/functions/tokentracker-usage-summary?tz={{tz}}&from=&to=2999-12-31",
+        "method": "GET",
+        "response_format": "json",
+        "extract": {
+          "week_tokens": "rolling.last_7d.totals.billable_total_tokens",
+          "week_conv": "rolling.last_7d.totals.conversation_count",
+          "month_tokens": "rolling.last_30d.totals.billable_total_tokens",
+          "month_avg": "rolling.last_30d.avg_per_active_day",
+          "total_tokens": "totals.billable_total_tokens",
+          "total_all_tokens": "totals.total_tokens",
+          "total_cost": "totals.total_cost_usd",
+          "total_conv": "totals.conversation_count"
+        },
+        "process": [
+          {
+            "var": "week_color",
+            "source": "week_tokens",
+            "function": "threshold_switch",
+            "value_map": {
+              "0": "0",
+              "150000000": "1",
+              "500000000": "2"
+            }
+          },
+          {
+            "var": "month_color",
+            "source": "month_tokens",
+            "function": "threshold_switch",
+            "value_map": {
+              "0": "0",
+              "500000000": "1",
+              "1500000000": "2"
+            }
+          },
+          {
+            "var": "week_tokens_fmt",
+            "source": "week_tokens",
+            "function": "regex_replace",
+            "pattern": "^$",
+            "to": "?"
+          },
+          {
+            "var": "week_tokens_fmt",
+            "source": "week_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{8})$",
+            "to": "$1.$2B"
+          },
+          {
+            "var": "week_tokens_fmt",
+            "source": "week_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{5})$",
+            "to": "$1.$2M"
+          },
+          {
+            "var": "week_tokens_fmt",
+            "source": "week_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{2})$",
+            "to": "$1.$2K"
+          },
+          {
+            "var": "month_tokens_fmt",
+            "source": "month_tokens",
+            "function": "regex_replace",
+            "pattern": "^$",
+            "to": "?"
+          },
+          {
+            "var": "month_tokens_fmt",
+            "source": "month_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{8})$",
+            "to": "$1.$2B"
+          },
+          {
+            "var": "month_tokens_fmt",
+            "source": "month_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{5})$",
+            "to": "$1.$2M"
+          },
+          {
+            "var": "month_tokens_fmt",
+            "source": "month_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{2})$",
+            "to": "$1.$2K"
+          },
+          {
+            "var": "total_tokens_fmt",
+            "source": "total_tokens",
+            "function": "regex_replace",
+            "pattern": "^$",
+            "to": "?"
+          },
+          {
+            "var": "total_tokens_fmt",
+            "source": "total_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{8})$",
+            "to": "$1.$2B"
+          },
+          {
+            "var": "total_tokens_fmt",
+            "source": "total_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{5})$",
+            "to": "$1.$2M"
+          },
+          {
+            "var": "total_tokens_fmt",
+            "source": "total_tokens_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d{1,3})(\\d)(\\d{2})$",
+            "to": "$1.$2K"
+          },
+          {
+            "var": "total_cost_fmt",
+            "source": "total_cost",
+            "function": "regex_replace",
+            "pattern": "^(\\d+\\.\\d{2})\\d*$",
+            "to": "$1"
+          },
+          {
+            "var": "total_cost_fmt",
+            "source": "total_cost_fmt",
+            "function": "regex_replace",
+            "pattern": "^(\\d+)$",
+            "to": "$1.00"
+          }
+        ]
+      }
+    ],
+    "process": [
+      {
+        "var": "mode_label",
+        "source": "display_mode",
+        "function": "map",
+        "map": {
+          "today": "今日",
+          "today_all": "今日总量",
+          "week": "近7天",
+          "month": "近30天",
+          "total": "累计",
+          "week_cost": "近7天花费",
+          "total_cost": "累计花费"
+        }
+      },
+      {
+        "var": "mode_short",
+        "source": "display_mode",
+        "function": "map",
+        "map": {
+          "today": "今日",
+          "today_all": "今日+",
+          "week": "7D",
+          "month": "30D",
+          "total": "累计",
+          "week_cost": "7D$",
+          "total_cost": "累计$"
+        }
+      },
+      {
+        "var": "mode_tpl",
+        "source": "display_mode",
+        "function": "map",
+        "map": {
+          "today": "{{today_tokens_fmt}}",
+          "today_all": "{{today_total_fmt}}",
+          "week": "{{week_tokens_fmt}}",
+          "month": "{{month_tokens_fmt}}",
+          "total": "{{total_tokens_fmt}}",
+          "week_cost": "${{cost_7d_fmt}}",
+          "total_cost": "${{total_cost_fmt}}"
+        }
+      },
+      {
+        "var": "mode_value",
+        "source": "mode_tpl",
+        "function": "resolve_template"
+      },
+      {
+        "var": "mode_color_tpl",
+        "source": "display_mode",
+        "function": "map",
+        "map": {
+          "today": "{{today_color}}",
+          "today_all": "{{today_color}}",
+          "week": "{{week_color}}",
+          "month": "{{month_color}}",
+          "total": "0",
+          "week_cost": "{{cost_color}}",
+          "total_cost": "0"
+        }
+      },
+      {
+        "var": "mode_color",
+        "source": "mode_color_tpl",
+        "function": "resolve_template"
+      }
+    ]
+  },
+  "outputs": [
+    {
+      "key": "main",
+      "label": "{{mode_label ?? 'Token'}}",
+      "short_label": "{{mode_short ?? 'TK'}}",
+      "format_val": "{{mode_value}}",
+      "color": "{{mode_color}}",
+      "unit": ""
+    },
+    {
+      "key": "today",
+      "label": "今日 Token",
+      "short_label": "今日",
+      "format_val": "{{today_tokens_fmt}}",
+      "color": "{{today_color}}",
+      "unit": ""
+    },
+    {
+      "key": "week",
+      "label": "近 7 天 Token",
+      "short_label": "7D",
+      "format_val": "{{week_tokens_fmt}}",
+      "color": "{{week_color}}",
+      "unit": ""
+    },
+    {
+      "key": "month",
+      "label": "近 30 天 Token",
+      "short_label": "30D",
+      "format_val": "{{month_tokens_fmt}}",
+      "color": "{{month_color}}",
+      "unit": ""
+    },
+    {
+      "key": "cost",
+      "label": "近 7 天花费",
+      "short_label": "花费",
+      "format_val": "${{cost_7d_fmt}}",
+      "color": "{{cost_color}}",
+      "unit": ""
+    }
+  ]
+}
